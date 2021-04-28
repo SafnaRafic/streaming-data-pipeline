@@ -67,25 +67,30 @@ object StreamingPipeline {
       })
       reviews.printSchema()
 
-      //Question 3- Extract the userId from the Review object.
+      //Question 3 - Extract the userId from the Review object. - customer_Id
       val userData = reviews.mapPartitions(partition => {
 
+        // Connecting to Hbase (cloud)
         val conf = HBaseConfiguration.create()
         conf.set("hbase.zookeeper.quorum", "cdh01.hourswith.expert:2181,cdh02.hourswith.expert:2181,cdh03.hourswith.expert:2181")
         val connection = ConnectionFactory.createConnection(conf)
         val table = connection.getTable(TableName.valueOf("srafic:users"))
 
         val iteration = partition.map(row => {
+
+          // Question 4 - Use the userId to lookup the corresponding user data in HBase.
           val get = new Get(row.customer_id).addFamily("f1")
           val result = table.get(get)
           // println(result) - For checking the fields in the table
 
+          // Getting user data from Hbase
           val name = result.getValue("f1", "name")
           val username = result.getValue("f1", "username")
           val sex = result.getValue("f1", "sex")
           val birthdate = result.getValue("f1", "birthdate")
           val user = User(name, username, sex, birthdate)
 
+          //Question 5 - Join the review data with the user data.
           Both(user, row)
 
         }).toList.iterator
