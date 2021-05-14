@@ -7,6 +7,8 @@ import org.apache.log4j.Logger
 import org.apache.spark.sql.streaming.{OutputMode, Trigger}
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
+import scala.Console.out
+
 /**
  * Spark Structured Streaming app
  *
@@ -16,6 +18,10 @@ object StreamingPipeline {
   case class Review(marketplace: String, customer_id: String, review_id: String, product_id: String, product_parent: String, product_title: String, product_category: String, star_rating: String, helpful_votes: String, total_votes: String, vine: String, verified_purchase: String, review_headline: String, review_body: String, review_date: String) //#2
   case class User(name: String, username: String, sex: String, birthdate: String) //#3
   case class Both(user: User, review: Review)
+  case class EnrichedReview(name: String, username: String, sex: String, birthdate: String, marketplace: String,customer_id: String,
+                  review_id: String,product_id: String,product_parent: String,product_title: String,
+                  product_category: String,star_rating: String,helpful_votes: String,total_votes: String,
+                  vine: String,verified_purchase: String,review_headline: String,review_body: String,review_date: String)
 
   lazy val logger: Logger = Logger.getLogger(this.getClass)
   val jobName = "StreamingPipeline"
@@ -26,7 +32,14 @@ object StreamingPipeline {
 
   def main(args: Array[String]): Unit = {
     try {
-      val spark = SparkSession.builder().appName(jobName).master("local[*]").getOrCreate()
+      val spark = SparkSession.builder()
+        .appName(jobName)
+        .master("local[*]")
+        .config("spark.hadoop.dfs.client.use.datanode.hostname", "true")
+        .config("spark.hadoop.fs.defaultFS", "hdfs://manager.hourswith.expert:8020")
+        .getOrCreate()
+
+//      val spark = SparkSession.builder().appName(jobName).master("local[*]").getOrCreate()
 
       // TODO: change bootstrap servers to your kafka brokers
       // Question 1- Ingest data from a "reviews" Kafka topic.
@@ -74,7 +87,7 @@ object StreamingPipeline {
         val conf = HBaseConfiguration.create()
         conf.set("hbase.zookeeper.quorum", "cdh01.hourswith.expert:2181,cdh02.hourswith.expert:2181,cdh03.hourswith.expert:2181")
         val connection = ConnectionFactory.createConnection(conf)
-        val table = connection.getTable(TableName.valueOf("srafic:users"))
+        val table = connection.getTable(TableName.valueOf("srafic:users2"))
 
         val iteration = partition.map(row => {
 
@@ -88,10 +101,14 @@ object StreamingPipeline {
           val username = result.getValue("f1", "username")
           val sex = result.getValue("f1", "sex")
           val birthdate = result.getValue("f1", "birthdate")
-          val user = User(name, username, sex, birthdate)
+//          val user = User(name, username, sex, birthdate)
+          EnrichedReview(name, username, sex, birthdate,
+            row.marketplace,row.customer_id,row.review_id,row.product_id,row.product_parent,row.product_title,
+            row.product_category,row.star_rating,row.helpful_votes,row.total_votes,row.vine,row.verified_purchase,
+            row.review_headline,row.review_body,row.review_date)
 
           //Question 5 - Join the review data with the user data.
-          Both(user, row)
+//          Both(user, row)
 
         }).toList.iterator
 
@@ -99,13 +116,24 @@ object StreamingPipeline {
         iteration
 
       })
+//  Printing the output in the console
+//      val query = userData.writeStream
+//        .outputMode(OutputMode.Append())
+//        .format("console")
+//        .option("truncate", false)
+//        .trigger(Trigger.ProcessingTime("5 seconds"))
+//        .start()
+
 
       val query = userData.writeStream
         .outputMode(OutputMode.Append())
-        .format("console")
-        .option("truncate", false)
+        .format("json")
+        .partitionBy("star_rating")
+        .option("checkpointLocation", "/user/srafic/checkpoint")
+        .option("path", "/user/srafic/reviews_streaming")
         .trigger(Trigger.ProcessingTime("5 seconds"))
         .start()
+
 
       query.awaitTermination()
 
